@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Minesweeper</title>
+<style>
+	th{
+		/*padding: 13px 13px 13px 13px;*/
+		width: 30px;
+		height: 30px;
+	}
+</style>
+<meta charset="UTF-8"/>
+</head>
+<body>
+	<table id='minefield'></table>
+	<!--Bomb coverage-->
+	<button onclick="UiButton(this.innerHTML);" type="button">+</button>
+	<span id="bombCover"></span>
+	<button onclick="UiButton(this.innerHTML);" type="button">-</button>
+	<!--width-->
+	<button onclick="UiButton(this.innerHTML);" type="button">←</button>
+	<span id="widthDisp"></span>
+	<button onclick="UiButton(this.innerHTML);" type="button">→</button>	
+	<!--height-->
+	<button onclick="UiButton(this.innerHTML);" type="button">↑</button>
+	<span id="heightDisp"></span>
+	<button onclick="UiButton(this.innerHTML);" type="button">↓</button>
+	<!--new game and end game-->
+	<button onclick="UiButton(this.innerHTML);" type="button">↻</button>
+	<button onclick="UiButton(this.innerHTML);" type="button">x</button>
+	<!--smile-->
+	<span id="smileState"></span>
+	<!--flag mode-->
+	<button id='flagModeDisp' onclick="UiButton(this.innerHTML);" type="button">🔍</button>
+
+	<script>
+		"use strict";
+		//mine field data
+		let height = 10;
+		let width = 10;
+		let size = height * width;
+		let minefield = [];
+		function InitMineField(){
+			//reset size and minefeild
+			size = height * width;
+			minefield = [];
+			//add new elements
+			for(let i = 0; i < size; ++i){
+				minefield.push({
+				flagged: false,
+				bomb: false,
+				tested: false,
+				visited: false,
+				bombCount: 0,
+				});
+			}
+		}
+		
+		//drawing
+		const Trow = "<tr>[colums]</tr>";
+		const Tcol = '<th onclick="TileClicked([x],[y],this.value);">[[x],[y]]</th>';
+		let tableBuffer = "";
+		function InitTableBuffer(){
+			//run this if you change the size of the board
+			let tmpRows = "";
+			for(let y = 0; y < height; ++y){
+				let tmpCol = "";
+				for(let x = 0; x < width; ++x){
+					const tmpCord = x.toString() + ',' + y.toString();
+					let tmp = Tcol.replace('[x],[y]', tmpCord);
+					tmpCol += tmp.replace('[x],[y]', tmpCord);
+					
+				}
+				tmpRows += Trow.replace('[colums]', tmpCol);
+			}
+			tableBuffer = tmpRows;
+		}
+		
+		function DrawMinefield(){
+			const feildDraw = document.getElementById('minefield');
+			//copy the template
+			let tmpTable = tableBuffer.slice(0);
+			for(let y = 0; y < height; ++y){
+				for(let x = 0; x < width; ++x){
+					//decode and set the tile graphic
+					let icon = "◼"
+					const tile = minefield[x + y * width];
+					if (!tile.bomb && tile.tested){
+						if (tile.bombCount < 1){
+							icon = '◻';
+						} else {
+							icon = tile.bombCount.toString();
+						}
+					} else if (tile.bomb && tile.tested){
+						icon = "💣";
+					} else if (tile.flagged){
+						icon = "🏳";
+					}
+					tmpTable = tmpTable.replace('[' + x.toString() + ',' + y.toString() + ']', icon);
+				}
+			}
+			//update the display
+			feildDraw.innerHTML = tmpTable;
+		}
+		
+		//gameplay
+		function WinCheck(){
+			for(let i = 0; i < size; ++i){
+				if (!minefield[i].bomb && !minefield[i].tested)
+					return false;
+			}
+			return true;
+		}
+
+		function EndShowAll(){
+			//ends the game and shows all spaces
+			gameOver = true;
+			for(let i = 0; i < size; ++i){
+				minefield[i].tested = true;
+			}
+			DrawMinefield();
+		}
+
+		function FloodFill(x, y){
+			let locationBuffer = [{x:x,y:y}];
+			let breakFor = false;
+			do{
+				breakFor = false;
+				for(let y2 = Math.max(0, y - 1); y2 < Math.min(y + 2, height) && !breakFor; ++y2){
+					for(let x2 = Math.max(0, x - 1); x2 < Math.min(x + 2, width) && !breakFor; ++x2){
+						const tmpTile = minefield[x2 + y2 * width];
+						if (!tmpTile.visited){
+							if (tmpTile.bombCount < 1){
+								x = x2;
+								y = y2;
+								locationBuffer.push({x:x,y:y});
+								breakFor = true;
+							}
+							tmpTile.visited = true;
+							tmpTile.tested = true;
+						}
+					}
+				}
+				//move back and check if a spot was missed
+				if (!breakFor){
+					let tmpLoc = locationBuffer.pop();
+					x = tmpLoc.x;
+					y = tmpLoc.y;
+				}
+			}while(locationBuffer.length > 0)
+			//reset visited
+			for(let i = 0; i < size; ++i){
+				minefield[i].visited = false;
+			}
+		}
+
+		function UpdateBombCount(){
+			for(let y = 0; y < height; ++y){
+				for(let x = 0; x < width; ++x){
+					minefield[x + y * width].bombCount = 0;
+					for(let y2 = Math.max(0, y - 1); y2 < Math.min(y + 2, height); ++y2){
+						for(let x2 = Math.max(0, x - 1); x2 < Math.min(x + 2, width); ++x2){
+							minefield[x + y * width].bombCount += minefield[x2 + y2 * width].bomb ? 1 : 0;
+						}
+					}
+				}
+			}
+		}
+
+		let firstClick = false;
+		let gameOver = false;
+		let lost = false;
+		let flagMode = '🔍';
+		function TileClicked( x, y, value ){
+			const tile = minefield[x + y * width];
+			//mark flags if flag mode
+			if (flagMode === '🏳'){
+				tile.flagged = !tile.flagged;
+				UpdateDrawAll();
+				return;
+			}
+			//mark as tested if not already
+			if (tile.tested || gameOver) return;
+			tile.tested = true;
+			//bomb check
+			if (tile.bomb){
+				//remove bomb if first click
+				if (firstClick){
+					tile.bomb = false;
+					UpdateBombCount();
+				} else {
+					//loose end game and show the board
+					EndShowAll();
+					lost = true;
+				}
+			}
+			firstClick = false; //remove first click safty
+			//check if can flood fill
+			if (tile.bombCount < 1){
+				FloodFill(x,y);
+			}
+			//win check
+			if (WinCheck() && !gameOver){
+				EndShowAll();
+				gameOver = true;
+				lost = false;
+			}
+			//update screen
+			UpdateDrawAll();
+		}
+
+		let rngSeed = (new Date()).getTime() % 1000000;
+		function NextPrime(){
+			if (rngSeed % 2 == 0) ++rngSeed;
+			let prime = false;
+			do{
+				rngSeed += 2;
+				const checkTo = Math.sqrt(rngSeed);
+				prime = true;
+				for(let i = 3; i < checkTo; i += 2){
+					if (rngSeed % i === 0){
+						prime = false;
+						break;
+					}
+				}
+			}while(!prime);
+			return Math.trunc(rngSeed / 10) % 2 === 0
+		}
+		function Rng(max){
+			let ret = 0;
+			for(let i = 0; i < 8; ++i){
+				if (NextPrime()){
+					ret += 2 ^ i;
+				}
+			}
+			return ret % max;
+		}
+
+		let bombsCoverage = 25;
+		function NewGame(newHeight, newWidth, newBombsCoverage){
+			//bombsCoverage between 100 and 0 for how many bombs to spawn 
+			//setup field
+			height = nextNewHeight = Math.trunc(newHeight);
+			width = nextNewWidth = Math.trunc(newWidth);
+			size = height * width;
+			bombsCoverage = newBombsCoverage;
+			gameOver = false;
+			firstClick = true;
+			lost = false;
+			InitMineField();
+			InitTableBuffer();
+			//place bombs
+			const bombCount = Math.trunc(bombsCoverage / 100 * size);
+			for(let i = 0; i < bombCount; ++i){
+				minefield[Rng(width) + Rng(height) * width].bomb = true;			
+			}
+			//update bomb count
+			UpdateBombCount();
+			//draw board
+			UpdateDrawAll();
+		}
+
+		let nextNewHeight = height;
+		let nextNewWidth = width;
+		function UiButton(value){
+			switch(value){
+				case '-':
+					bombsCoverage = Math.max(0, bombsCoverage - 5);
+				break;
+				case '+':
+					bombsCoverage = Math.min(100, bombsCoverage + 5);
+				break;
+
+				case '←':
+					nextNewWidth = Math.max(1, nextNewWidth - 1);
+				break;
+				case '→':
+				if (nextNewWidth + 1 < 256)
+					++nextNewWidth;
+				break;
+
+				case '↑':
+					nextNewHeight = Math.max(1, nextNewHeight - 1);
+				break;
+				case '↓':
+				if (nextNewHeight + 1 < 256)
+					++nextNewHeight;
+				break;
+
+				case '↻':
+					if (confirm("New Game?")){
+						NewGame( nextNewHeight, nextNewWidth, bombsCoverage);
+					}
+				break;
+				case 'x':
+					if (confirm("End Game?")){
+						EndShowAll();
+					}
+				break;
+				case '🔍':
+					flagMode = '🏳';
+				break;
+				case '🏳':
+					flagMode = '🔍';
+				break;
+				
+			}
+			//update ui count
+			document.getElementById('bombCover').innerHTML = Math.trunc(bombsCoverage).toString() + "%"; 
+			document.getElementById('widthDisp').innerHTML = Math.trunc(nextNewWidth).toString(); 
+			document.getElementById('heightDisp').innerHTML = Math.trunc(nextNewHeight).toString(); 
+			document.getElementById('flagModeDisp').innerHTML = flagMode;
+		}
+		
+		function UpdateSmileState(){
+			let smile = '🙂';
+			if (gameOver) {
+				if (!lost){
+					smile = '😎';
+				} else {
+					smile = '😵';
+				}
+			}
+			document.getElementById('smileState').innerHTML = smile;
+		}
+
+		function UpdateDrawAll(){
+			DrawMinefield();
+			UpdateSmileState();
+			UiButton(undefined);
+		}
+
+		//init screen
+		NewGame(height,width,bombsCoverage);
+		UpdateDrawAll();
+		
+	</script>
+</body>
+</html>
